@@ -1,10 +1,16 @@
 """
-ahp.py - Implementasi Analytic Hierarchy Process (AHP)
+ahp.py - Implementasi Analytic Hierarchy Process (AHP) Murni
 
-Modul ini mengimplementasikan metode AHP secara lengkap untuk
+Modul ini mengimplementasikan metode AHP secara lengkap dan murni untuk
 Sistem Pendukung Keputusan (SPK). AHP digunakan untuk menentukan
-bobot prioritas kriteria dan meranking alternatif berdasarkan
+bobot prioritas kriteria DAN meranking alternatif — keduanya melalui
 perbandingan berpasangan (pairwise comparison).
+
+Dalam AHP Murni:
+  1. Bobot kriteria didapat dari matriks perbandingan berpasangan antar kriteria.
+  2. Skor setiap alternatif per kriteria juga dinormalisasi melalui perbandingan
+     berpasangan antar alternatif (bukan SAW/WP/Fuzzy).
+  3. Skor akhir = jumlah (bobot_kriteria × prioritas_lokal_alternatif).
 
 Referensi: Saaty, T.L. (1980). The Analytic Hierarchy Process.
 """
@@ -180,123 +186,148 @@ def calculate_consistency_ratio(
             f"Ukuran matriks ({n}) melebihi batas tabel RI (maksimal 15)."
         )
 
-    # Hitung vektor prioritas
     priority_vector = calculate_priority_vector(matrix)
-
-    # Hitung λmax
     lambda_max = calculate_lambda_max(matrix, priority_vector)
-
-    # Hitung CI
     ci = calculate_consistency_index(lambda_max, n)
 
-    # Cari RI dari tabel
     ri = RI_TABLE.get(n, 0.0)
 
-    # Hitung CR (tangani kasus RI = 0)
     if ri == 0:
-        # Untuk matriks 1×1 atau 2×2, CR otomatis 0 (selalu konsisten)
         cr = 0.0
     else:
         cr = ci / ri
 
-    # Cek konsistensi
     is_consistent = cr < 0.1
 
     return (cr, ci, lambda_max, is_consistent)
 
 
-def normalize_benefit(values: list) -> list:
-    """Normalisasi kriteria bertipe benefit (semakin tinggi semakin baik).
+# =============================================================================
+# AHP MURNI: Perbandingan Berpasangan Antar Alternatif per Kriteria
+# =============================================================================
 
-    Rumus:
-        normalized = value / max(values)
+def build_alternative_pairwise_matrix(
+    values: list[float], crit_type: str = "benefit"
+) -> np.ndarray:
+    """Membangun matriks perbandingan berpasangan antar alternatif untuk satu kriteria.
 
-    Args:
-        values: Daftar nilai mentah dari suatu kriteria benefit.
+    Dalam AHP Murni, setiap alternatif dibandingkan satu-satu terhadap alternatif
+    lain untuk setiap kriteria. Perbandingan didasarkan pada rasio nilai:
+        - Untuk 'benefit': matrix[i][j] = values[i] / values[j]
+        - Untuk 'cost'   : matrix[i][j] = values[j] / values[i]  (dibalik)
 
-    Returns:
-        list: Daftar nilai yang telah dinormalisasi (0.0 - 1.0).
-
-    Raises:
-        ValueError: Jika daftar nilai kosong atau semua nilai nol.
-    """
-    if not values:
-        raise ValueError("Daftar nilai tidak boleh kosong.")
-
-    max_val = max(values)
-
-    if max_val == 0:
-        raise ValueError(
-            "Nilai maksimum adalah 0, normalisasi benefit tidak dapat dilakukan."
-        )
-
-    return [v / max_val for v in values]
-
-
-def normalize_cost(values: list) -> list:
-    """Normalisasi kriteria bertipe cost (semakin rendah semakin baik).
-
-    Rumus:
-        normalized = min(values) / value
+    Matriks bersifat resiprokal: matrix[j][i] = 1 / matrix[i][j].
 
     Args:
-        values: Daftar nilai mentah dari suatu kriteria cost.
+        values   : Daftar nilai numerik setiap alternatif untuk kriteria ini.
+        crit_type: 'benefit' (semakin besar semakin baik) atau
+                   'cost' (semakin kecil semakin baik).
 
     Returns:
-        list: Daftar nilai yang telah dinormalisasi (0.0 - 1.0).
+        np.ndarray: Matriks perbandingan berpasangan n×n.
 
     Raises:
-        ValueError: Jika daftar nilai kosong atau mengandung nilai nol.
+        ValueError: Jika values kosong, mengandung nol, atau crit_type tidak valid.
     """
     if not values:
-        raise ValueError("Daftar nilai tidak boleh kosong.")
+        raise ValueError("Daftar nilai alternatif tidak boleh kosong.")
 
-    if any(v == 0 for v in values):
+    arr = np.array(values, dtype=float)
+
+    if np.any(arr <= 0):
         raise ValueError(
-            "Daftar nilai mengandung angka 0, normalisasi cost tidak dapat dilakukan "
-            "(pembagian dengan nol)."
+            "Semua nilai alternatif harus positif (> 0) agar perbandingan valid."
         )
 
-    min_val = min(values)
+    if crit_type not in ("benefit", "cost"):
+        raise ValueError(
+            f"crit_type '{crit_type}' tidak valid. Gunakan 'benefit' atau 'cost'."
+        )
 
-    return [min_val / v for v in values]
+    n = len(arr)
+
+    if crit_type == "benefit":
+        # Semakin tinggi nilai → semakin unggul → rasio langsung
+        matrix = arr.reshape(n, 1) / arr.reshape(1, n)
+    else:
+        # Semakin rendah nilai → semakin unggul → rasio dibalik
+        matrix = arr.reshape(1, n) / arr.reshape(n, 1)
+
+    return matrix
+
+
+def calculate_local_priorities(
+    criteria_scores: dict,
+    criteria_names: list[str],
+    criteria_types: list[str],
+) -> dict[str, np.ndarray]:
+    """Menghitung vektor prioritas lokal setiap alternatif untuk setiap kriteria.
+
+    Untuk setiap kriteria:
+        1. Kumpulkan nilai mentah semua alternatif.
+        2. Bangun matriks perbandingan berpasangan antar alternatif.
+        3. Hitung vektor prioritas (eigenvector ternormalisasi) dari matriks tersebut.
+
+    Hasilnya adalah bobot relatif setiap alternatif *per kriteria* — inilah inti
+    dari AHP Murni yang membedakannya dari SAW/WP.
+
+    Args:
+        criteria_scores: Dict {nama_alternatif: {nama_kriteria: skor}}.
+        criteria_names : Daftar nama kriteria sesuai urutan bobot.
+        criteria_types : Daftar tipe ('benefit'/'cost') sesuai urutan criteria_names.
+
+    Returns:
+        Dict {nama_kriteria: np.ndarray vektor_prioritas_lokal}.
+        Urutan elemen vektor sesuai urutan alternatif di criteria_scores.
+
+    Raises:
+        ValueError: Jika input tidak konsisten atau mengandung nilai tidak valid.
+    """
+    if len(criteria_names) != len(criteria_types):
+        raise ValueError("Jumlah nama kriteria dan tipe kriteria harus sama.")
+
+    alternative_names = list(criteria_scores.keys())
+    local_priorities: dict[str, np.ndarray] = {}
+
+    for crit_name, crit_type in zip(criteria_names, criteria_types):
+        raw_values = [
+            float(criteria_scores[alt][crit_name])
+            for alt in alternative_names
+        ]
+
+        pairwise = build_alternative_pairwise_matrix(raw_values, crit_type)
+        priority = calculate_priority_vector(pairwise)
+        local_priorities[crit_name] = priority
+
+    return local_priorities
 
 
 def calculate_final_scores(
     criteria_scores: dict,
     priority_vector: np.ndarray,
-    criteria_names: list,
-    criteria_types: list,
+    criteria_names: list[str],
+    criteria_types: list[str],
 ) -> dict:
-    """Menghitung skor akhir setiap alternatif berdasarkan bobot AHP dan normalisasi.
+    """Menghitung skor akhir AHP Murni untuk setiap alternatif.
 
-    Langkah-langkah:
-        1. Untuk setiap kriteria, kumpulkan semua nilai dari seluruh alternatif.
-        2. Normalisasi menggunakan metode benefit atau cost sesuai tipe kriteria.
-        3. Hitung skor tertimbang: sum(nilai_normalisasi × bobot) untuk setiap alternatif.
+    Alur AHP Murni (berbeda dari SAW/WP):
+        1. Untuk setiap kriteria, bangun matriks perbandingan berpasangan
+           antar alternatif berdasarkan nilai mentah mereka.
+        2. Dari matriks tersebut, hitung vektor prioritas lokal
+           (bobot relatif alternatif untuk kriteria itu).
+        3. Skor akhir alternatif = Σ (bobot_kriteria × prioritas_lokal_alternatif).
+
+    Ini berbeda dari SAW yang memakai normalisasi max-value atau min-value
+    secara langsung tanpa pembentukan matriks perbandingan.
 
     Args:
-        criteria_scores: Dictionary dengan nama alternatif sebagai key dan
-                         dictionary {nama_kriteria: skor} sebagai value.
-                         Contoh:
-                         {
-                             'Teknik Informatika': {
-                                 'nilai': 4.5, 'minat': 5, 'bakat': 5,
-                                 'psikologi': 3, 'motivasi': 3, 'biaya': 1
-                             },
-                             'Sistem Informasi': {
-                                 'nilai': 3.0, 'minat': 4, 'bakat': 3,
-                                 'psikologi': 4, 'motivasi': 4, 'biaya': 2
-                             }
-                         }
-        priority_vector: Array numpy berisi bobot AHP untuk setiap kriteria.
-        criteria_names: Daftar nama kriteria sesuai urutan priority_vector.
-        criteria_types: Daftar tipe kriteria ('benefit' atau 'cost')
-                        sesuai urutan criteria_names.
+        criteria_scores : Dict {nama_alternatif: {nama_kriteria: skor}}.
+        priority_vector : Vektor bobot kriteria hasil AHP (panjang = jumlah kriteria).
+        criteria_names  : Daftar nama kriteria sesuai urutan priority_vector.
+        criteria_types  : Daftar tipe ('benefit'/'cost') sesuai urutan criteria_names.
 
     Returns:
-        dict: Dictionary dengan nama alternatif sebagai key dan skor akhir
-              sebagai value.
+        dict: {nama_alternatif: skor_akhir_float}.
 
     Raises:
         ValueError: Jika input tidak valid atau tidak konsisten.
@@ -305,9 +336,7 @@ def calculate_final_scores(
         raise ValueError("Data skor kriteria tidak boleh kosong.")
 
     if len(criteria_names) != len(criteria_types):
-        raise ValueError(
-            "Jumlah nama kriteria dan tipe kriteria harus sama."
-        )
+        raise ValueError("Jumlah nama kriteria dan tipe kriteria harus sama.")
 
     if len(criteria_names) != len(priority_vector):
         raise ValueError(
@@ -316,36 +345,19 @@ def calculate_final_scores(
 
     alternative_names = list(criteria_scores.keys())
 
-    # nilai mentah per kriteria dari semua alternatif
-    raw_values: dict[str, list] = {name: [] for name in criteria_names}
-    for alt_name in alternative_names:
-        scores = criteria_scores[alt_name]
-        for crit_name in criteria_names:
-            raw_values[crit_name].append(scores[crit_name])
+    # ── Langkah AHP Murni: hitung prioritas lokal per kriteria ──────────
+    local_priorities = calculate_local_priorities(
+        criteria_scores, criteria_names, criteria_types
+    )
 
-    # 
-    # Normalisasi setiap kriteria sesuai tipenya
-    normalized_values: dict[str, list] = {}
-    for crit_name, crit_type in zip(criteria_names, criteria_types):
-        values = raw_values[crit_name]
-        if crit_type == "benefit":
-            normalized_values[crit_name] = normalize_benefit(values)
-        elif crit_type == "cost":
-            normalized_values[crit_name] = normalize_cost(values)
-        else:
-            raise ValueError(
-                f"Tipe kriteria '{crit_type}' tidak valid. "
-                "Gunakan 'benefit' atau 'cost'."
-            )
-
-    # Hitung skor akhir untuk setiap alternatif
+    # ── Agregasi: skor akhir = Σ (bobot_kriteria × prioritas_lokal) ─────
     final_scores: dict[str, float] = {}
     for i, alt_name in enumerate(alternative_names):
         score = 0.0
         for j, crit_name in enumerate(criteria_names):
-            normalized_val = normalized_values[crit_name][i]
             weight = priority_vector[j]
-            score += normalized_val * weight
+            local_priority = local_priorities[crit_name][i]
+            score += weight * local_priority
         final_scores[alt_name] = score
 
     return final_scores
@@ -369,15 +381,48 @@ def rank_alternatives(final_scores: dict) -> list[tuple]:
     if not final_scores:
         raise ValueError("Data skor akhir tidak boleh kosong.")
 
-    # Urutkan berdasarkan skor secara menurun
     sorted_alternatives = sorted(
         final_scores.items(), key=lambda x: x[1], reverse=True
     )
 
-    # Buat daftar tuple dengan peringkat
     ranked = [
         (rank + 1, name, score)
         for rank, (name, score) in enumerate(sorted_alternatives)
     ]
 
     return ranked
+
+
+# =============================================================================
+# Fungsi bantu: ringkasan matriks lokal (untuk ditampilkan di UI jika diperlukan)
+# =============================================================================
+
+def get_local_priority_tables(
+    criteria_scores: dict,
+    criteria_names: list[str],
+    criteria_types: list[str],
+) -> dict[str, dict]:
+    """Menghasilkan ringkasan matriks perbandingan lokal per kriteria.
+
+    Berguna untuk menampilkan transparansi perhitungan AHP di antarmuka.
+
+    Returns:
+        Dict {nama_kriteria: {'matrix': np.ndarray, 'priority': np.ndarray}}
+    """
+    alternative_names = list(criteria_scores.keys())
+    result = {}
+
+    for crit_name, crit_type in zip(criteria_names, criteria_types):
+        raw_values = [
+            float(criteria_scores[alt][crit_name])
+            for alt in alternative_names
+        ]
+        pairwise = build_alternative_pairwise_matrix(raw_values, crit_type)
+        priority = calculate_priority_vector(pairwise)
+        result[crit_name] = {
+            "matrix": pairwise,
+            "priority": priority,
+            "alternative_names": alternative_names,
+        }
+
+    return result

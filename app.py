@@ -21,7 +21,8 @@ from ahp import (
     calculate_priority_vector,
     calculate_consistency_ratio,
     calculate_final_scores,
-    rank_alternatives
+    rank_alternatives,
+    get_local_priority_tables,
 )
 from data_processing import (
     load_dataset,
@@ -698,9 +699,16 @@ elif halaman == "🧮 Hitung SPK (AHP)":
                 st.markdown("##### 📊 Grafik Bobot Prioritas")
                 st.bar_chart(priority_df.set_index('Kriteria'))
 
-            # Step 3: Scoring Alternatives
-            st.markdown("### 🏆 Langkah 3: Perangkingan Program Studi")
+            # Step 3: Scoring Alternatives — AHP Murni
+            st.markdown("### 🏆 Langkah 3: Prioritas Lokal Alternatif (AHP Murni)")
             st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
+
+            st.info(
+                "**AHP Murni**: Setiap program studi dibandingkan secara berpasangan "
+                "untuk setiap kriteria menggunakan matriks perbandingan berpasangan. "
+                "Hasilnya berupa **vektor prioritas lokal** — bobot relatif tiap prodi "
+                "per kriteria — yang kemudian digabungkan dengan bobot kriteria di atas."
+            )
 
             # Get compatibility scores for each prodi
             prodi_scores = get_all_prodi_scores(selected_minat, selected_bakat, selected_biaya)
@@ -717,13 +725,35 @@ elif halaman == "🧮 Hitung SPK (AHP)":
                     'biaya': prodi_scores[prodi]['biaya']
                 }
 
-            # Calculate final scores
+            # AHP Murni: hitung prioritas lokal per kriteria & tampilkan
+            local_tables = get_local_priority_tables(
+                criteria_scores, criteria_names, criteria_types
+            )
+            criteria_labels_map = {
+                'nilai': 'Nilai', 'minat': 'Minat', 'bakat': 'Bakat',
+                'psikologi': 'Psikologi', 'motivasi': 'Motivasi', 'biaya': 'Biaya'
+            }
+
+            with st.expander("📊 Lihat Vektor Prioritas Lokal per Kriteria (Detail AHP Murni)", expanded=False):
+                for crit_name in criteria_names:
+                    tbl = local_tables[crit_name]
+                    st.markdown(f"**Kriteria: {criteria_labels_map.get(crit_name, crit_name)}**")
+                    pv_df = pd.DataFrame({
+                        'Program Studi': tbl['alternative_names'],
+                        'Prioritas Lokal': np.round(tbl['priority'], 4)
+                    })
+                    st.dataframe(pv_df, use_container_width=True, hide_index=True)
+                    st.markdown("---")
+
+            # Calculate final scores (AHP Murni)
             final_scores = calculate_final_scores(
                 criteria_scores, priority, criteria_names, criteria_types
             )
             ranking = rank_alternatives(final_scores)
 
-            # Display ranking as styled cards
+            # Langkah 4: Display ranking as styled cards
+            st.markdown("### 🏅 Langkah 4: Hasil Perangkingan Program Studi")
+            st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
             for rank, name, score in ranking:
                 if rank == 1:
                     css_class = "rank-gold"
