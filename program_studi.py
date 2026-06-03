@@ -2,7 +2,6 @@ from typing import Dict
 # =============================================================================
 # 1. DAFTAR PROGRAM STUDI
 # =============================================================================
-# 15 program studi umum di universitas Indonesia
 DAFTAR_PRODI: list[str] = [
     "Teknik Informatika",
     "Sistem Informasi",
@@ -44,19 +43,18 @@ BAKAT_OPTIONS: list[str] = [
 ]
 
 # =============================================================================
-# 4. OPSI BIAYA (Kisaran Anggaran)
+# 4. BIAYA_OPTIONS dihapus — sekarang menggunakan Family_Income dari dataset
 # =============================================================================
-BIAYA_OPTIONS: list[str] = [
-    "Rendah",
-    "Sedang",
-    "Tinggi",
+# Family_Income dari dataset: "Low", "Medium", "High"
+FAMILY_INCOME_OPTIONS: list[str] = [
+    "Low",
+    "Medium",
+    "High",
 ]
 
 # =============================================================================
 # 5. MATRIKS MINAT - PROGRAM STUDI (Skor 1-5)
 # =============================================================================
-# Setiap minat dipetakan ke skor kompatibilitas untuk masing-masing prodi.
-# Skor 5 = sangat cocok, 1 = tidak cocok.
 MINAT_PRODI_MATRIX: Dict[str, Dict[str, int]] = {
     "Teknologi": {
         "Teknik Informatika": 5,
@@ -148,7 +146,6 @@ MINAT_PRODI_MATRIX: Dict[str, Dict[str, int]] = {
 # =============================================================================
 # 6. MATRIKS BAKAT - PROGRAM STUDI (Skor 1-5)
 # =============================================================================
-# Setiap bakat dipetakan ke skor kompatibilitas untuk masing-masing prodi.
 BAKAT_PRODI_MATRIX: Dict[str, Dict[str, int]] = {
     "Analitis": {
         "Teknik Informatika": 5,
@@ -240,7 +237,6 @@ BAKAT_PRODI_MATRIX: Dict[str, Dict[str, int]] = {
 # =============================================================================
 # 7. BIAYA PROGRAM STUDI (Level Biaya Kuliah)
 # =============================================================================
-# Pemetaan setiap prodi ke level biaya kuliahnya
 BIAYA_PRODI: Dict[str, str] = {
     "Teknik Informatika": "Tinggi",
     "Sistem Informasi": "Sedang",
@@ -260,88 +256,54 @@ BIAYA_PRODI: Dict[str, str] = {
 }
 
 # =============================================================================
-# 8. MATRIKS KOMPATIBILITAS BIAYA
+# 8. MATRIKS KOMPATIBILITAS FAMILY INCOME vs BIAYA PRODI
 # =============================================================================
-# Skor kompatibilitas antara anggaran mahasiswa dan biaya prodi.
-# Kunci luar = anggaran mahasiswa, kunci dalam = biaya prodi.
-# Contoh: anggaran 'Rendah' vs biaya prodi 'Tinggi' → skor 1 (tidak cocok).
-BIAYA_COMPATIBILITY: Dict[str, Dict[str, int]] = {
-    "Rendah": {"Rendah": 5, "Sedang": 2, "Tinggi": 1},
-    "Sedang": {"Rendah": 5, "Sedang": 4, "Tinggi": 2},
-    "Tinggi": {"Rendah": 5, "Sedang": 5, "Tinggi": 5},
+# Family_Income dari dataset: Low / Medium / High
+# Dicocokkan dengan biaya prodi: Rendah / Sedang / Tinggi
+# Skor 1-5: semakin cocok semakin tinggi
+FAMILY_INCOME_COMPATIBILITY: Dict[str, Dict[str, int]] = {
+    "Low":    {"Rendah": 5, "Sedang": 2, "Tinggi": 1},
+    "Medium": {"Rendah": 5, "Sedang": 4, "Tinggi": 2},
+    "High":   {"Rendah": 5, "Sedang": 5, "Tinggi": 5},
 }
 
 # =============================================================================
 # 9. FUNGSI-FUNGSI UTILITAS
 # =============================================================================
 
-
 def get_minat_score(minat: str, prodi: str) -> int:
-    """Mendapatkan skor kompatibilitas antara minat dan program studi (1-5).
-
-    Args:
-        minat: Kategori minat mahasiswa (salah satu dari MINAT_OPTIONS).
-        prodi: Nama program studi (salah satu dari DAFTAR_PRODI).
-
-    Returns:
-        Skor kompatibilitas 1-5 (5 = sangat cocok, 1 = tidak cocok).
-    """
     return MINAT_PRODI_MATRIX[minat][prodi]
 
 
 def get_bakat_score(bakat: str, prodi: str) -> int:
-    """Mendapatkan skor kompatibilitas antara bakat dan program studi (1-5).
-
-    Args:
-        bakat: Kategori bakat mahasiswa (salah satu dari BAKAT_OPTIONS).
-        prodi: Nama program studi (salah satu dari DAFTAR_PRODI).
-
-    Returns:
-        Skor kompatibilitas 1-5 (5 = sangat cocok, 1 = tidak cocok).
-    """
     return BAKAT_PRODI_MATRIX[bakat][prodi]
 
 
-def get_biaya_score(user_budget: str, prodi: str) -> int:
-    """Mendapatkan skor kompatibilitas biaya (1-5).
-
-    Semakin tinggi ketidakcocokan anggaran (budget rendah vs biaya tinggi),
-    semakin rendah skornya.
-
-    Args:
-        user_budget: Anggaran mahasiswa ('Rendah', 'Sedang', atau 'Tinggi').
-        prodi: Nama program studi (salah satu dari DAFTAR_PRODI).
-
-    Returns:
-        Skor kompatibilitas biaya 1-5.
-    """
+def get_family_income_score(family_income: str, prodi: str) -> int:
+    """Mendapatkan skor kompatibilitas Family_Income dari dataset dengan biaya prodi (1-5)."""
     prodi_cost = BIAYA_PRODI[prodi]
-    return BIAYA_COMPATIBILITY[user_budget][prodi_cost]
+    return FAMILY_INCOME_COMPATIBILITY[family_income][prodi_cost]
 
 
-def get_all_prodi_scores(minat: str, bakat: str, biaya: str) -> Dict[str, Dict[str, int]]:
-    """Mendapatkan skor minat, bakat, dan biaya untuk semua 15 program studi.
-
+def get_all_prodi_scores(minat: str, bakat: str, family_income: str) -> Dict[str, Dict[str, int]]:
+    """Mendapatkan skor minat, bakat, dan family_income untuk semua 15 program studi.
+    
     Args:
-        minat: Kategori minat mahasiswa (salah satu dari MINAT_OPTIONS).
-        bakat: Kategori bakat mahasiswa (salah satu dari BAKAT_OPTIONS).
-        biaya: Anggaran mahasiswa ('Rendah', 'Sedang', atau 'Tinggi').
-
-    Returns:
-        Dictionary dengan nama prodi sebagai key dan dictionary skor
-        {'minat': int, 'bakat': int, 'biaya': int} sebagai value.
+        minat: Kategori minat mahasiswa.
+        bakat: Kategori bakat mahasiswa.
+        family_income: Tingkat pendapatan keluarga dari dataset ('Low', 'Medium', 'High').
     """
     results: Dict[str, Dict[str, int]] = {}
     for prodi in DAFTAR_PRODI:
         results[prodi] = {
             "minat": get_minat_score(minat, prodi),
             "bakat": get_bakat_score(bakat, prodi),
-            "biaya": get_biaya_score(biaya, prodi),
+            "family_income": get_family_income_score(family_income, prodi),
         }
     return results
 
 
-#DESKRIPSI PROGRAM STUDI
+# DESKRIPSI PROGRAM STUDI
 PRODI_DESCRIPTIONS: Dict[str, str] = {
     "Teknik Informatika": (
         "Mempelajari pengembangan perangkat lunak, algoritma, kecerdasan buatan, "
